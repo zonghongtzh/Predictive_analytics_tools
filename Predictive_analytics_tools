@@ -1,0 +1,162 @@
+# plots bi-variate equations, any general equation in x 
+equation_limit_test <- function(equation_in_x_string, limits_left_bound, limits_right_bound) {
+  x_cord = seq(limits_left_bound,limits_right_bound,0.01)
+  x <- x_cord
+  y_cord = eval(parse(text=equation_in_x_string))
+  full_cord = data.frame(x_cord,y_cord)
+  plot(full_cord,
+       type = "l")
+  left_limit = full_cord$y_cord[1]
+  right_limit = tail(full_cord$y_cord,n=1)
+  return(paste(toString(limits_left_bound), " limit:", toString(left_limit), "|| ", toString(limits_right_bound), " :", toString(right_limit)))
+}
+
+forecasting_error <- function(forecast, actual) {
+  error <- forecast - actual
+  return(error)
+}
+
+percentage_error <- function(forecast, actual) {
+  percentage_of_error <- (forecast-actual)/actual
+  return(percentage_of_error)
+}
+
+# Data_frame containing FORECAST on first column and ACTUAL on second column 
+mean_squared_error <- function(Data_frame) {
+  forecast <- Data_frame[1]
+  actual <- Data_frame[2]
+  squared_error <- (forecast-actual)^2
+  MSE <- sum(squared_error)/length(squared_error)
+  return(MSE)
+}
+
+root_mean_squared_error <- function(Data_frame) {
+  Predictive_analytics_tools::mean_squared_error
+  RMSE <- mean_squared_error(Data_frame)^0.5
+  return(RMSE)
+}
+
+mean_absolute_deviation <- function(Data_frame) {
+  length_of_df <- length(Data_frame[,1])
+  abs_difference <- abs(data_frame[,1] - data_frame[,2])
+  total_abs_difference <- sum(abs(data_frame[,1] - data_frame[,2]))
+  MAD <- total_abs_difference/length_of_df
+  return(MAD)
+}
+
+mean_absolute_percentage_error <- function(Data_frame) {
+  length_of_df <- length(Data_frame[,1])
+  print(percentage_error(Data_frame[,1],Data_frame[,2]))
+  percentage_error_array <- sum(abs(percentage_error(Data_frame[,1],Data_frame[,2])))
+  MAPE <- percentage_error_array/length_of_df
+  return(MAPE)
+}
+
+# Data_frame contains changes of one value (e.g. 1 stock price data) ACC measures e.g. price correlation with itself in lag = 1, or lag = 2. 
+# Lag time = integers
+auto_correlation_coefficient <- function(Data_frame, lag_time) {
+  length_df <- length(Data_frame[,1])
+  mean_of_df <- mean(Data_frame[,1])
+  front_df <- head(data_frame[,1],length_df - lag_time)
+  back_df <- tail(data_frame[,1],length_df - lag_time)
+  full_df <- data.frame(front_data = front_df, back_data = back_df)
+  full_df['mean'] <- rep(mean_of_df,length(front_df))
+  full_df['numerator'] <- (full_df["front_data"]-full_df["mean"])*(full_df["back_data"]-full_df["mean"])
+  full_df['denominator'] <- (full_df["front_data"]-full_df["mean"])^2
+  ACC <- sum(full_df['numerator'])/sum(full_df['denominator'])
+  return(ACC)
+}
+
+# list contains time series, list must be in ascending date order [latest] --> [newest], if list is not in ascending order, use rev() to reverse
+# use df["MA_list"][df["MA_list"] != "NA", ] to remove rows with "NA"
+simple_moving_average <- function(list_ts, period) {
+  moving_list <- tail(list_ts,length(list_ts) - period)
+  moving_average_list <- c()
+  for (i in 0:length(moving_list)) {
+    lookback <- (list_ts[(i+1):(period+i)])
+    moving_average <- mean(lookback)
+    moving_average_list[i+1] <- moving_average
+  }
+  MA_list <- append(rep(NA,period), moving_average_list)
+  original_list <- append(list_ts,rep(NA,1))
+  MA_df <- data.frame(original_list,MA_list)
+  y1 <- MA_df$MA_list
+  y2 <- MA_df$original_list
+  plot(y1,type="l",col="red")
+  lines(y2,col="blue")
+  legend(
+    "topright", 
+    lty=c(1,2), 
+    col=c("red", "blue"),
+    legend = c("MA_list", "original_list")
+  )
+  return(MA_df)
+}
+
+# list contains time series, list must be in ascending date order [latest] --> [newest], if list is not in ascending order, use rev() to reverse
+# smoothing_parameter 0 < a < 1
+# here initial forecast is taken as 100% accurate (as in equal to the actual value of time=2), you can try to vary the "initial_forecast = "
+exponential_moving_average <- function(list_ts, smoothing_parameter) {
+  length_of_smoothing <- length(list_ts[2:length(list_ts)])
+  initial_forecast = list_ts[2]
+  EMA_forecast <- c(initial_forecast)
+  for (i in 1:length_of_smoothing) {
+    smoothed_forecast <- EMA_forecast[i] + smoothing_parameter*(list_ts[i] - EMA_forecast[i])
+    EMA_forecast <- append(EMA_forecast, smoothed_forecast)
+  }
+  EMA_forecast <- append(c(NA),EMA_forecast)
+  original_list <- append(list_ts,rep(NA,1))
+  EMA_df <- data.frame(original_list,EMA_forecast)
+  y1 <- EMA_df$EMA_forecast
+  y2 <- EMA_df$original_list
+  plot(y1,type="l",col="red")
+  lines(y2,col="blue")
+  legend(
+    "topright", 
+    lty=c(1,2), 
+    col=c("red", "blue"),
+    legend = c("EMA_forecast", "original_list")
+  )
+  return(EMA_df)
+}
+#alpha and beta must be 0 < x < 1
+#forecast period is the period after end of data that you want to forecast
+holt_linear_es <- function(list_ts, alpha, beta, forecast_period) {
+  init_level <- c(NA, list_ts[2])
+  init_trend <- c(NA, list_ts[2] - list_ts[1])
+  init_forecast <- rep(NA,2)
+  init_error <- rep(NA,2)
+  for (i in 1:(length(list_ts)-2)) {
+    forecast <- init_level[(1+i)] + init_trend[(1+i)]
+    init_forecast[(2+i)] <- forecast
+    error <- list_ts[(2+i)] - forecast
+    init_error[(2+i)] <- error
+    level <- alpha * list_ts[(2+i)] + (1-alpha) * (init_level[(1+i)] + init_trend[(1+i)])
+    init_level[(2+i)] <- level
+    trend <- beta * (level - init_level[(1+i)]) + (1-beta) * init_trend[(1+i)]
+    init_trend[(2+i)] <- trend
+  }
+
+  for (i in 1:forecast_period) {
+    length_backtest <- length(init_forecast)
+    forecast <- tail(init_level,1) + (i * tail(init_trend,1))
+    init_forecast[(1 + length_backtest)] <- forecast 
+  }
+  list_ts_ahead <- append(list_ts, rep(NA, forecast_period))
+  init_level <- append(init_level, rep(NA, forecast_period))
+  init_trend <- append(init_trend, rep(NA, forecast_period))
+  init_error <- append(init_error, rep(NA, forecast_period))
+  holt_df <- data.frame(original_list = list_ts_ahead, level = init_level, trend = init_trend, forecast = init_forecast, error = init_error)
+  
+  y1 <- holt_df$forecast
+  y2 <- holt_df$original_list
+  plot(y1,type="l",col="red")
+  lines(y2,col="blue")
+  legend(
+    "topright", 
+    lty=c(1,2), 
+    col=c("red", "blue"),
+    legend = c("holt_forecast", "original_list")
+  )
+  return(holt_df)
+}
