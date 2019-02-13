@@ -202,7 +202,78 @@ holt_linear_es <- function(list_ts, alpha, beta, forecast_period) {
 # forced_AutoCC_period, leave as 0 if dont need, else change to prefered AutoCC
 holt_winters_es <- function(list_ts, alpha, beta, gamma, forecast_period) {
   seasonality_period <- auto_correlation_coefficient_highest(list_ts)
+  init_seasonal_avg <- mean(head(list_ts,seasonality_period))
+  init_seasonal <- c()
+  for (i in 1:seasonality_period) {
+    seasonal <- list_ts[i]/init_seasonal_avg
+    init_seasonal[i] <- seasonal
+  }
+  init_level <- rep(NA, seasonality_period)
+  init_trend <- rep(NA, seasonality_period)
+  init_forecast <- rep(NA, (seasonality_period+1))
+  init_error <- rep(NA, (seasonality_period+1))
+  level_first <- list_ts[(seasonality_period+1)]/init_seasonal[1]
+  init_level[(seasonality_period+1)] <- level_first
+  trend_first <- level_first - list_ts[seasonality_period]/init_seasonal[seasonality_period]
+  init_trend[(seasonality_period+1)] <- trend_first
+  seasonal_first <- gamma * (list_ts[(seasonality_period + 1)]/level_first) + (1 - gamma)*init_seasonal[1]
+  init_seasonal[(seasonality_period+1)] <- seasonal_first
+  init_df <- data.frame(init_level,init_trend,init_seasonal,init_forecast,init_error)
 
+  for (j in seasonality_period:(length(list_ts))) {
+    season_time <- (j + 2 - seasonality_period)
+    forecast <- (init_df$init_level[(j+1)] + init_df$init_trend[(j+1)])*init_df$init_seasonal[season_time]
+    init_forecast[(j + 2)] <- forecast
+    error <- list_ts[(j + 2)] - forecast
+    init_error[(j + 2)] <- error
+    level <- alpha * (list_ts[(j + 2)])/init_df$init_seasonal[season_time] + (1-alpha)*(init_df$init_level[(j+1)] + init_df$init_trend[(j+1)])
+    init_level[(j + 2)] <- level
+    trend <- beta*(level - init_df$init_level[(j+1)]) + (1-beta) * init_df$init_trend[(j+1)] 
+    init_trend[(j + 2)] <- trend
+    seasonal <- gamma  * (list_ts[(j + 2)])/level + (1-gamma)*init_df$init_seasonal[season_time]
+    init_seasonal[(j + 2)] <- seasonal
+    init_df <- data.frame(init_level,init_trend,init_seasonal,init_forecast,init_error)
+  }
+
+  future_forecast_list <- c()
+  forecast_period_level <- tail(init_df$init_level,3)[1]
+  forecast_period_trend <- tail(init_df$init_trend,3)[1]
+  forecast_period_seasonality <- tail(init_df$init_seasonal,seasonality_period+2)
+  for (k in 1:forecast_period) {
+    season_time <- (k/seasonality_period - as.integer(k/seasonality_period)) * seasonality_period
+    if (season_time == 0) {
+      season_time = seasonality_period
+    }
+    future_forecast <- (forecast_period_level + forecast_period_trend) * forecast_period_seasonality[round(season_time)]
+    future_forecast_list[k] <- future_forecast
+  }
+  future_forecast_list <- future_forecast_list[-1]
+  init_forecast <- init_forecast[-length(init_forecast)]
+  init_level <- append(init_level, rep(NA,length(future_forecast_list)-1))
+  init_trend <- append(init_trend, rep(NA,length(future_forecast_list)-1))
+  init_seasonal <- append(init_seasonal, rep(NA,length(future_forecast_list)-1))
+  init_forecast <- append(init_forecast,future_forecast_list)
+  init_error <- append(init_error, rep(NA, length(future_forecast_list)-1))
+  original_list <- append(list_ts, rep(NA, length(future_forecast_list)+1))
+  init_df <- data.frame(original_list,init_level,init_trend,init_seasonal,init_forecast,init_error)
+
+  y1 <- init_df$init_forecast
+  y2 <- init_df$original_list
+  plot(y1,type="l",col="red")
+  lines(y2,col="blue")
+  legend(
+    "topleft", 
+    lty=c(1,2), 
+    col=c("red", "blue"),
+    legend = c("holt_forecast", "original_list"),
+    cex = 0.65
+  )
+  return(init_df)
+}
+
+holt_winters_es_determine_seasonality_period <- function(list_ts, alpha, beta, gamma, forecast_period, forced_period_seasonality) {
+  seasonality_period <- auto_correlation_coefficient_highest(list_ts)
+  seasonality_period <- forced_period_seasonality
   init_seasonal_avg <- mean(head(list_ts,seasonality_period))
   init_seasonal <- c()
   for (i in 1:seasonality_period) {
