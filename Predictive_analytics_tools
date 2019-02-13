@@ -1,4 +1,10 @@
-# plots bi-variate equations, any general equation in x 
+mypath <- "C:\\Users\\Tan Zong Hong\\R_codes\\DBA3216_predictive_analytics"
+setwd(mypath)
+
+library(readr)
+library(ggplot2)
+
+# plots general bivariate equations 
 equation_limit_test <- function(equation_in_x_string, limits_left_bound, limits_right_bound) {
   x_cord = seq(limits_left_bound,limits_right_bound,0.01)
   x <- x_cord
@@ -54,17 +60,36 @@ mean_absolute_percentage_error <- function(Data_frame) {
 
 # Data_frame contains changes of one value (e.g. 1 stock price data) ACC measures e.g. price correlation with itself in lag = 1, or lag = 2. 
 # Lag time = integers
-auto_correlation_coefficient <- function(Data_frame, lag_time) {
-  length_df <- length(Data_frame[,1])
-  mean_of_df <- mean(Data_frame[,1])
-  front_df <- head(data_frame[,1],length_df - lag_time)
-  back_df <- tail(data_frame[,1],length_df - lag_time)
+# edit, using list_ts instead
+auto_correlation_coefficient <- function(list_ts, lag_time) {
+  length_df <- length(list_ts)
+  mean_of_df <- mean(list_ts)
+  front_df <- head(list_ts,length_df - lag_time)
+  back_df <- tail(list_ts,length_df - lag_time)
   full_df <- data.frame(front_data = front_df, back_data = back_df)
   full_df['mean'] <- rep(mean_of_df,length(front_df))
   full_df['numerator'] <- (full_df["front_data"]-full_df["mean"])*(full_df["back_data"]-full_df["mean"])
   full_df['denominator'] <- (full_df["front_data"]-full_df["mean"])^2
-  ACC <- sum(full_df['numerator'])/sum(full_df['denominator'])
+  numerator <- sum(tail(full_df$numerator,length(full_df$numerator)-lag_time))
+  ACC <- numerator/sum(full_df['denominator'])
   return(ACC)
+}
+
+# test for seasonality trend
+auto_correlation_coefficient_highest <- function(list_ts) {
+  AutoCC_list <- c()
+  for (i in (1:length(list_ts)-1)) {
+    AutoCC <- auto_correlation_coefficient(list_ts,i)
+    AutoCC_list[i] <- AutoCC
+  }
+  AutoCC_df <- data.frame(period = seq(1:(length(list_ts)-1)),AutoCC_list)
+  below_1_AutoCC <- AutoCC_df$AutoCC_list[AutoCC_df$AutoCC_list <= 1]
+  highest_AutoCC <- max(below_1_AutoCC)
+  index_highest_AutoCC <- AutoCC_df$period[AutoCC_df$AutoCC_list == highest_AutoCC]
+  seasonality_period <- min(index_highest_AutoCC)
+  print(AutoCC_df)
+  print(paste("period = ", seasonality_period,",AutoCC = ", auto_correlation_coefficient(list_ts,seasonality_period)), sep = "")
+  return(seasonality_period)
 }
 
 # list contains time series, list must be in ascending date order [latest] --> [newest], if list is not in ascending order, use rev() to reverse
@@ -88,7 +113,8 @@ simple_moving_average <- function(list_ts, period) {
     "topright", 
     lty=c(1,2), 
     col=c("red", "blue"),
-    legend = c("MA_list", "original_list")
+    legend = c("MA_list", "original_list"),
+    cex = 0.65
   )
   return(MA_df)
 }
@@ -115,13 +141,19 @@ exponential_moving_average <- function(list_ts, smoothing_parameter) {
     "topright", 
     lty=c(1,2), 
     col=c("red", "blue"),
-    legend = c("EMA_forecast", "original_list")
+    legend = c("EMA_forecast", "original_list"),
+    cex = 0.65
   )
   return(EMA_df)
 }
-#alpha and beta must be 0 < x < 1
-#forecast period is the period after end of data that you want to forecast
+
+# list_ts in ascending time series ie: latest -> earliest
+# alpha and beta are smoothing factors between 0 < x < 1,  Alpha smooths levels, beta smooths trend
+# if alpha = 1, you are emphasizing only one the actual outcome yesterday, 
+# if beta = 1 then the next trend will not factor in yesterday's trend
+# forecast period is the period after end of data that you want to forecast
 holt_linear_es <- function(list_ts, alpha, beta, forecast_period) {
+  library(ggplot2)
   init_level <- c(NA, list_ts[2])
   init_trend <- c(NA, list_ts[2] - list_ts[1])
   init_forecast <- rep(NA,2)
@@ -147,7 +179,7 @@ holt_linear_es <- function(list_ts, alpha, beta, forecast_period) {
   init_trend <- append(init_trend, rep(NA, forecast_period))
   init_error <- append(init_error, rep(NA, forecast_period))
   holt_df <- data.frame(original_list = list_ts_ahead, level = init_level, trend = init_trend, forecast = init_forecast, error = init_error)
-  
+
   y1 <- holt_df$forecast
   y2 <- holt_df$original_list
   plot(y1,type="l",col="red")
@@ -156,7 +188,86 @@ holt_linear_es <- function(list_ts, alpha, beta, forecast_period) {
     "topright", 
     lty=c(1,2), 
     col=c("red", "blue"),
-    legend = c("holt_forecast", "original_list")
+    legend = c("holt_forecast", "original_list"),
+    cex = 0.65
   )
   return(holt_df)
+}
+
+# list_ts in ascending time series ie: latest -> earliest
+# alpha (0 < x < 1), smooths level
+# beta (0 < x < 1), smooths trend
+# gamma (0 < x < 1), smooths seasonality
+# Forecast_period is "look forward forecast", should try to keep within seasonality period
+# forced_AutoCC_period, leave as 0 if dont need, else change to prefered AutoCC
+holt_winters_es <- function(list_ts, alpha, beta, gamma, forecast_period) {
+  seasonality_period <- auto_correlation_coefficient_highest(list_ts)
+
+  init_seasonal_avg <- mean(head(list_ts,seasonality_period))
+  init_seasonal <- c()
+  for (i in 1:seasonality_period) {
+    seasonal <- list_ts[i]/init_seasonal_avg
+    init_seasonal[i] <- seasonal
+  }
+  init_level <- rep(NA, seasonality_period)
+  init_trend <- rep(NA, seasonality_period)
+  init_forecast <- rep(NA, (seasonality_period+1))
+  init_error <- rep(NA, (seasonality_period+1))
+  level_first <- list_ts[(seasonality_period+1)]/init_seasonal[1]
+  init_level[(seasonality_period+1)] <- level_first
+  trend_first <- level_first - list_ts[seasonality_period]/init_seasonal[seasonality_period]
+  init_trend[(seasonality_period+1)] <- trend_first
+  seasonal_first <- gamma * (list_ts[(seasonality_period + 1)]/level_first) + (1 - gamma)*init_seasonal[1]
+  init_seasonal[(seasonality_period+1)] <- seasonal_first
+  init_df <- data.frame(init_level,init_trend,init_seasonal,init_forecast,init_error)
+
+  for (j in seasonality_period:(length(list_ts))) {
+    season_time <- (j + 2 - seasonality_period)
+    forecast <- (init_df$init_level[(j+1)] + init_df$init_trend[(j+1)])*init_df$init_seasonal[season_time]
+    init_forecast[(j + 2)] <- forecast
+    error <- list_ts[(j + 2)] - forecast
+    init_error[(j + 2)] <- error
+    level <- alpha * (list_ts[(j + 2)])/init_df$init_seasonal[season_time] + (1-alpha)*(init_df$init_level[(j+1)] + init_df$init_trend[(j+1)])
+    init_level[(j + 2)] <- level
+    trend <- beta*(level - init_df$init_level[(j+1)]) + (1-beta) * init_df$init_trend[(j+1)] 
+    init_trend[(j + 2)] <- trend
+    seasonal <- gamma  * (list_ts[(j + 2)])/level + (1-gamma)*init_df$init_seasonal[season_time]
+    init_seasonal[(j + 2)] <- seasonal
+    init_df <- data.frame(init_level,init_trend,init_seasonal,init_forecast,init_error)
+  }
+
+  future_forecast_list <- c()
+  forecast_period_level <- tail(init_df$init_level,3)[1]
+  forecast_period_trend <- tail(init_df$init_trend,3)[1]
+  forecast_period_seasonality <- tail(init_df$init_seasonal,seasonality_period+2)
+  for (k in 1:forecast_period) {
+    season_time <- (k/seasonality_period - as.integer(k/seasonality_period)) * seasonality_period
+    if (season_time == 0) {
+      season_time = seasonality_period
+    }
+    future_forecast <- (forecast_period_level + forecast_period_trend) * forecast_period_seasonality[round(season_time)]
+    future_forecast_list[k] <- future_forecast
+  }
+  future_forecast_list <- future_forecast_list[-1]
+  init_forecast <- init_forecast[-length(init_forecast)]
+  init_level <- append(init_level, rep(NA,length(future_forecast_list)-1))
+  init_trend <- append(init_trend, rep(NA,length(future_forecast_list)-1))
+  init_seasonal <- append(init_seasonal, rep(NA,length(future_forecast_list)-1))
+  init_forecast <- append(init_forecast,future_forecast_list)
+  init_error <- append(init_error, rep(NA, length(future_forecast_list)-1))
+  original_list <- append(list_ts, rep(NA, length(future_forecast_list)+1))
+  init_df <- data.frame(original_list,init_level,init_trend,init_seasonal,init_forecast,init_error)
+
+  y1 <- init_df$init_forecast
+  y2 <- init_df$original_list
+  plot(y1,type="l",col="red")
+  lines(y2,col="blue")
+  legend(
+    "topleft", 
+    lty=c(1,2), 
+    col=c("red", "blue"),
+    legend = c("holt_forecast", "original_list"),
+    cex = 0.65
+  )
+  return(init_df)
 }
